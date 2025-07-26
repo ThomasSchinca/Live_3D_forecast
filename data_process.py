@@ -353,21 +353,21 @@ def main():
     df = pd.read_csv("https://ucdp.uu.se/downloads/ged/ged251-csv.zip",
                          parse_dates=['date_start','date_end'], low_memory=False)
         
-    # Load monthly candidates
-    month = datetime.now().strftime("%m")
-    if month == '01':
-        month = '13'
+    # # Load monthly candidates
+    # month = datetime.now().strftime("%m")
+    # if month == '01':
+    #     month = '13'
 
-    # Vectorized concatenation
-    dfs_to_concat = [df]
-    for i in range(1, int(month)):
-        df_can = pd.read_csv(f'https://ucdp.uu.se/downloads/candidateged/GEDEvent_v25_0_{i}.csv')
-        df_can.columns = df.columns
-        df_can['date_start'] = pd.to_datetime(df_can['date_start'])
-        df_can['date_end'] = pd.to_datetime(df_can['date_end'])
-        dfs_to_concat.append(df_can)
+    # # Vectorized concatenation
+    # dfs_to_concat = [df]
+    # for i in range(1, int(month)):
+    #     df_can = pd.read_csv(f'https://ucdp.uu.se/downloads/candidateged/GEDEvent_v25_0_{i}.csv')
+    #     df_can.columns = df.columns
+    #     df_can['date_start'] = pd.to_datetime(df_can['date_start'])
+    #     df_can['date_end'] = pd.to_datetime(df_can['date_end'])
+    #     dfs_to_concat.append(df_can)
 
-    df = pd.concat(dfs_to_concat, axis=0).drop_duplicates()
+    # df = pd.concat(dfs_to_concat, axis=0).drop_duplicates()
 
     # Process conflict data efficiently
     unique_grids = df.priogrid_gid.unique()
