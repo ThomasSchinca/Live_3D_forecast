@@ -1,5 +1,5 @@
 # .github/workflows/Part1.yml
-name: Part 1 - Data Processing and Pattern Matching
+name: Part_1
 
 on:
   schedule:
