@@ -27,13 +27,13 @@ jobs:
         pip install -r requirements.txt
         
     - name: Run data processing
-      timeout-minutes: 10 
+      timeout-minutes: 350
       continue-on-error: true
       run: python data_process.py
       
     - name: Upload intermediate results
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v3
       with:
         name: intermediate-data
         path: |
