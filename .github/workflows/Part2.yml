@@ -31,10 +31,7 @@ jobs:
       uses: actions/download-artifact@v4
       with:
         name: intermediate-data
-        path: |
-          Results/
-          df_prio.csv
-          *.pkl
+        path: Results/
         
     - name: Run pattern matching
       run: python forecast.py
