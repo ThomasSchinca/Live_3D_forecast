@@ -10,7 +10,6 @@ on:
 jobs:
   data-processing:
     runs-on: ubuntu-latest
-    timeout-minutes: 355
     
     steps:
     - name: Checkout code
@@ -28,9 +27,12 @@ jobs:
         pip install -r requirements.txt
         
     - name: Run data processing
+      timeout-minutes: 350 
+      continue-on-error: true
       run: python data_process.py
       
     - name: Upload intermediate results
+      if: always()
       uses: actions/upload-artifact@v4
       with:
         name: intermediate-data
