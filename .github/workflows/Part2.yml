@@ -38,6 +38,8 @@ jobs:
       - name: Extract artifact
         run: |
           unzip intermediate-data.zip -d Results/
+          mv Results/Results/* Results/
+          rmdir Results/Results
 
       - name: Run forecast
         run: python forecast.py

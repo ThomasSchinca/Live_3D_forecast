@@ -27,7 +27,7 @@ jobs:
         pip install -r requirements.txt
         
     - name: Run data processing
-      timeout-minutes: 10
+      timeout-minutes: 355
       continue-on-error: true
       run: python data_process.py
       
