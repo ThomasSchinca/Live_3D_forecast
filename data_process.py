@@ -497,6 +497,10 @@ def main():
 
     # Check for existing progress
     start_idx, dict_inp, dict_mat = load_progress()
+    if len(dict_inp)>0:
+        dict_inp = [dict_inp[i] for i in dict_inp.keys()]
+    if len(dict_mat)>0:
+        dict_mat = [dict_mat[i] for i in dict_mat.keys()]
 
     for idx in range(start_idx, len(final_traj)):
         coor = final_traj[idx]
