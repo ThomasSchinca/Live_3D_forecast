@@ -1,0 +1,58 @@
+# .github/workflows/Part1.yml
+name: Part_1_bis
+
+on:
+  workflow_run:
+    workflows: ["Part_1"]
+    types:
+      - completed
+  workflow_dispatch:
+
+jobs:
+  forecasting:
+    runs-on: ubuntu-latest
+    env:
+      GH_PAT: ${{ secrets.GH_PAT }}
+      REPO: ${{ github.repository }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          sudo apt-get install build-essential
+          pip install -r requirements.txt
+          pip install requests
+
+      - name: Download artifact from Part_1
+        run: |
+          python .github/scripts/download_artifact.py
+
+      - name: Extract artifact
+        run: |
+          unzip intermediate-data.zip -d Results/
+          mv Results/Results/* Results/
+          rmdir Results/Results
+        
+      - name: Run data processing
+        timeout-minutes: 355
+        continue-on-error: true
+        run: python data_process.py
+        
+      - name: Upload intermediate results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: intermediate-data_v2
+          path: |
+            Results/
+            df_prio.csv
+            *.pkl
+          retention-days: 1
