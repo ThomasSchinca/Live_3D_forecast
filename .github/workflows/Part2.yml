@@ -3,7 +3,7 @@ name: Part 2 - Forecasting
 
 on:
   workflow_run:
-    workflows: ["Part_1"]
+    workflows: ["Part_1_bis"]
     types:
       - completed
   workflow_dispatch:
@@ -33,11 +33,11 @@ jobs:
 
       - name: Download artifact from Part_1
         run: |
-          python .github/scripts/download_artifact.py
+          python .github/scripts/download_artifact_v2.py
 
       - name: Extract artifact
         run: |
-          unzip intermediate-data.zip -d Results/
+          unzip intermediate-data_v2.zip -d Results/
           mv Results/Results/* Results/
           rmdir Results/Results
 
