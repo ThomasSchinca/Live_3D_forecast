@@ -322,7 +322,9 @@ def main():
 
     # Check for existing progress
     start_idx, dict_inp, dict_mat = load_progress()
-
+    dict_inp = [dict_inp[i] for i in dict_inp.keys()]
+    dict_mat = [dict_mat[i] for i in dict_mat.keys()]
+    
     # =============================================================================
     # Matching process with parallel processing and resume capability
     # =============================================================================
