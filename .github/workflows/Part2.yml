@@ -37,7 +37,7 @@ jobs:
 
       - name: Extract artifact
         run: |
-          unzip intermediate-data_v2.zip -d Results/
+          unzip -o intermediate-data_v2.zip -d Results/
           mv Results/Results/* Results/
           rmdir Results/Results
 
