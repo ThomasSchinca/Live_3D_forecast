@@ -51,4 +51,4 @@ jobs:
           author_email: 41898282+github-actions[bot]@users.noreply.github.com
           github_token: ${{ secrets.GITHUB_TOKEN }}
           message: "chore: Update file"
-          add: "*.csv *.pkl"
+          add: "df_output.csv Results/gr_b_tot.pkl"
