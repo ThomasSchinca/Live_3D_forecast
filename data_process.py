@@ -343,293 +343,283 @@ def create_3d_array_optimized(df_prio_xy, df_input_values, max_row, max_col, max
 # Main Data Processing
 # =============================================================================
 
-def main():
-
-    # =============================================================================
-    # Load and Process Conflict Data
-    # =============================================================================
-
-    # Load main conflict data
-    df = pd.read_csv("https://ucdp.uu.se/downloads/ged/ged251-csv.zip",
-                         parse_dates=['date_start','date_end'], low_memory=False)
-        
-    # # Load monthly candidates
-    month = datetime.now().strftime("%m")
-    if month == '01':
-        month = '13'
-
-    # Vectorized concatenation
-    dfs_to_concat = [df]
-    for i in range(1, int(month)):
-        df_can = pd.read_csv(f'https://ucdp.uu.se/downloads/candidateged/GEDEvent_v25_0_{i}.csv')
-        df_can.columns = df.columns
-        df_can['date_start'] = pd.to_datetime(df_can['date_start'])
-        df_can['date_end'] = pd.to_datetime(df_can['date_end'])
-        dfs_to_concat.append(df_can)
-
-    df = pd.concat(dfs_to_concat, axis=0).drop_duplicates()
-
-    # Process conflict data efficiently
-    unique_grids = df.priogrid_gid.unique()
-    date_range = pd.date_range(df.date_start.min(), df.date_end.max())
-
-    # Use sparse matrix for efficiency
-    from scipy.sparse import lil_matrix
-    sparse_data = lil_matrix((len(date_range), len(unique_grids)), dtype=np.float32)
-
-    # Create mapping for faster lookup
-    grid_to_idx = {grid: idx for idx, grid in enumerate(unique_grids)}
-    date_to_idx = {date: idx for idx, date in enumerate(date_range)}
-
-    # Vectorized processing
-    for grid in unique_grids:
-        df_sub = df[df.priogrid_gid == grid]
-        # Only process same-month events
-        same_month_mask = df_sub.date_start.dt.month == df_sub.date_end.dt.month
-        df_sub_filtered = df_sub[same_month_mask]
-        
-        for _, row in df_sub_filtered.iterrows():
-            date_idx = date_to_idx.get(row.date_start.normalize())
-            if date_idx is not None:
-                sparse_data[date_idx, grid_to_idx[grid]] += row.best
-
-    # Convert to dense DataFrame
-    df_tot = pd.DataFrame(sparse_data.toarray(), index=date_range, columns=unique_grids)
-
-    # Resample monthly
-    df_tot_m = df_tot.resample('M').sum()
-    last_month = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
-    df_input = df_tot_m.loc[:last_month, :]
-
-    # Save to CSV
-    df_input.to_csv('df_prio.csv')
-    del df  # Free memory
-    del df_tot
-
-    # =============================================================================
-    # Search for patterns and similar cases
-    # =============================================================================
-
-    df_prio = pd.read_csv('prio.csv', index_col=0, parse_dates=True)
-    common_cols = df_prio.index.intersection(df_input.columns)
-    df_prio = df_prio.loc[common_cols]
-    df_input = df_input.loc[:,common_cols]
-    df_prio_xy = df_prio.iloc[:, :2]
-
-    # Create 3D array efficiently
-    max_row = df_prio_xy['row'].max()
-    max_col = df_prio_xy['col'].max()
-    max_time = len(df_input.index)
-
-    # Prepare data for numba function
-    df_prio_xy_array = np.column_stack([
-        df_prio_xy.index.values,
-        df_prio_xy['row'].values,
-        df_prio_xy['col'].values
-    ])
-    df_input_values = df_input.values.T
-
-    array_3d = create_3d_array_optimized(df_prio_xy_array, df_input_values, 
-                                         max_row, max_col, max_time)
-
-    # Adjust array dimensions
-    array_3d = array_3d[df_prio_xy['row'].min()-1:, df_prio_xy['col'].min()-1:, :]
-    array_3d_na = array_3d.copy()
-    array_3d_na[array_3d_na == 0] = np.nan
-    array_3d_zero = np.nan_to_num(array_3d, nan=0)
-
-    # Find trajectories
-    thres_gr = 2
-    traj_bo = []
-
-    # Vectorized trajectory search
-    last_12_months = array_3d_zero[:, :, -12:]
-    active_mask = (last_12_months != 0).any(axis=2)
-    active_coords = np.argwhere(active_mask)
-
-    for coord in active_coords:
-        traj_bo.append({'x': coord[0], 'y': coord[1]})
-
-    grouped_points = group_points(traj_bo, thres_gr)
-    grouped_points = [i for i in grouped_points if len(i)>1]
-    sum_t=[]
-    for t in grouped_points:
-        sum_tot=0
-        for co in t:
-            sum_tot+=array_3d_zero[co['x'],co['y'],-12:].sum()
-        sum_t.append(sum_tot)
-    grouped_points = [j for i,j in enumerate(grouped_points) if sum_t[i]>15]    
-
-        
-    # Process final trajectories
-    final_traj = []
-    for gr_li in grouped_points:
-        df_p = pd.DataFrame(gr_li)
-        x_coords = df_p['x'].values
-        y_coords = df_p['y'].values
-        
-        if len(np.unique(x_coords)) == 1:
-            x_min = x_max = x_coords[0]
-        else:
-            x_min, x_max = x_coords.min(), x_coords.max()
-        
-        if len(np.unique(y_coords)) == 1:
-            y_min = y_max = y_coords[0]
-        else:
-            y_min, y_max = y_coords.min(), y_coords.max()
-        
-        final_traj.append({'xmin': x_min, 'xmax': x_max, 'ymin': y_min, 'ymax': y_max})
-
-    # Save trajectories and intermediate data
-    dict_final_traj = {i: final_traj[i] for i in range(len(final_traj))}
-    with open('Results/final_traj.pkl', 'wb') as f:
-        pickle.dump(dict_final_traj, f)
-
-    # Save additional data needed for part 2
-    np.save('Results/array_3d_zero.npy', array_3d_zero)
+# Load main conflict data
+df = pd.read_csv("https://ucdp.uu.se/downloads/ged/ged251-csv.zip",
+                     parse_dates=['date_start','date_end'], low_memory=False)
     
-    with open('Results/df_prio_xy.pkl', 'wb') as f:
-        pickle.dump(df_prio_xy, f)
+# # Load monthly candidates
+month = datetime.now().strftime("%m")
+if month == '01':
+    month = '13'
 
-    # =============================================================================
-    # Matching process with parallel processing and resume capability (HEAVY PART)
-    # =============================================================================
+# Vectorized concatenation
+dfs_to_concat = [df]
+for i in range(1, int(month)):
+    df_can = pd.read_csv(f'https://ucdp.uu.se/downloads/candidateged/GEDEvent_v25_0_{i}.csv')
+    df_can.columns = df.columns
+    df_can['date_start'] = pd.to_datetime(df_can['date_start'])
+    df_can['date_end'] = pd.to_datetime(df_can['date_end'])
+    dfs_to_concat.append(df_can)
 
-    # Check for existing progress
-    start_idx, dict_inp, dict_mat = load_progress()
-    if len(dict_inp)>0:
-        dict_inp = [dict_inp[i] for i in dict_inp.keys()]
-    if len(dict_mat)>0:
-        dict_mat = [dict_mat[i] for i in dict_mat.keys()]
+df = pd.concat(dfs_to_concat, axis=0).drop_duplicates()
 
-    for idx in range(start_idx, len(final_traj)):
-        coor = final_traj[idx]
-        
-        sub_array = array_3d_zero[coor['xmin']:coor['xmax']+1, 
-                                  coor['ymin']:coor['ymax']+1, -12:]
-        
-        # Only append if we're processing new trajectories
-        if idx >= len(dict_inp):
-            dict_inp.append(sub_array)
-        
-        # Pre-compute values for this sub-array
-        bound_1 = np.array([[0, 0, 0], list(sub_array.shape)])
-        non_zero_indices = np.argwhere(sub_array != 0)
-        coordinates_1 = non_zero_indices.astype(np.float32)
-        coordinates_1 = (coordinates_1 - bound_1.min(axis=0)) / (bound_1.max(axis=0) - 1 - bound_1.min(axis=0))
-        coordinates_1 = np.nan_to_num(coordinates_1,0.5)
-        
-        if len(non_zero_indices) > 1:
-            weights_1 = sub_array[sub_array != 0]
-            weight_range = weights_1.flatten().max(axis=0) - weights_1.flatten().min(axis=0)
-            if weight_range > 0:
-                mass_w1 = sum((weights_1.flatten() - weights_1.flatten().min(axis=0)) / weight_range)
-            else:
-                mass_w1 = len(weights_1)  # All weights are equal
-            weights_1 = weights_1 / np.sum(weights_1)
+# Process conflict data efficiently
+unique_grids = df.priogrid_gid.unique()
+date_range = pd.date_range(df.date_start.min(), df.date_end.max())
+
+# Use sparse matrix for efficiency
+from scipy.sparse import lil_matrix
+sparse_data = lil_matrix((len(date_range), len(unique_grids)), dtype=np.float32)
+
+# Create mapping for faster lookup
+grid_to_idx = {grid: idx for idx, grid in enumerate(unique_grids)}
+date_to_idx = {date: idx for idx, date in enumerate(date_range)}
+
+# Vectorized processing
+for grid in unique_grids:
+    df_sub = df[df.priogrid_gid == grid]
+    # Only process same-month events
+    same_month_mask = df_sub.date_start.dt.month == df_sub.date_end.dt.month
+    df_sub_filtered = df_sub[same_month_mask]
+    
+    for _, row in df_sub_filtered.iterrows():
+        date_idx = date_to_idx.get(row.date_start.normalize())
+        if date_idx is not None:
+            sparse_data[date_idx, grid_to_idx[grid]] += row.best
+
+# Convert to dense DataFrame
+df_tot = pd.DataFrame(sparse_data.toarray(), index=date_range, columns=unique_grids)
+
+# Resample monthly
+df_tot_m = df_tot.resample('M').sum()
+last_month = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
+df_input = df_tot_m.loc[:last_month, :]
+
+# Save to CSV
+df_input.to_csv('df_prio.csv')
+del df  # Free memory
+del df_tot
+
+# =============================================================================
+# Search for patterns and similar cases
+# =============================================================================
+
+df_prio = pd.read_csv('prio.csv', index_col=0, parse_dates=True)
+common_cols = df_prio.index.intersection(df_input.columns)
+df_prio = df_prio.loc[common_cols]
+df_input = df_input.loc[:,common_cols]
+df_prio_xy = df_prio.iloc[:, :2]
+
+# Create 3D array efficiently
+max_row = df_prio_xy['row'].max()
+max_col = df_prio_xy['col'].max()
+max_time = len(df_input.index)
+
+# Prepare data for numba function
+df_prio_xy_array = np.column_stack([
+    df_prio_xy.index.values,
+    df_prio_xy['row'].values,
+    df_prio_xy['col'].values
+])
+df_input_values = df_input.values.T
+
+array_3d = create_3d_array_optimized(df_prio_xy_array, df_input_values, 
+                                     max_row, max_col, max_time)
+
+# Adjust array dimensions
+array_3d = array_3d[df_prio_xy['row'].min()-1:, df_prio_xy['col'].min()-1:, :]
+array_3d_na = array_3d.copy()
+array_3d_na[array_3d_na == 0] = np.nan
+array_3d_zero = np.nan_to_num(array_3d, nan=0)
+
+# Find trajectories
+thres_gr = 2
+traj_bo = []
+
+# Vectorized trajectory search
+last_12_months = array_3d_zero[:, :, -12:]
+active_mask = (last_12_months != 0).any(axis=2)
+active_coords = np.argwhere(active_mask)
+
+for coord in active_coords:
+    traj_bo.append({'x': coord[0], 'y': coord[1]})
+
+grouped_points = group_points(traj_bo, thres_gr)
+grouped_points = [i for i in grouped_points if len(i)>1]
+sum_t=[]
+for t in grouped_points:
+    sum_tot=0
+    for co in t:
+        sum_tot+=array_3d_zero[co['x'],co['y'],-12:].sum()
+    sum_t.append(sum_tot)
+grouped_points = [j for i,j in enumerate(grouped_points) if sum_t[i]>15]    
+
+    
+# Process final trajectories
+final_traj = []
+for gr_li in grouped_points:
+    df_p = pd.DataFrame(gr_li)
+    x_coords = df_p['x'].values
+    y_coords = df_p['y'].values
+    
+    if len(np.unique(x_coords)) == 1:
+        x_min = x_max = x_coords[0]
+    else:
+        x_min, x_max = x_coords.min(), x_coords.max()
+    
+    if len(np.unique(y_coords)) == 1:
+        y_min = y_max = y_coords[0]
+    else:
+        y_min, y_max = y_coords.min(), y_coords.max()
+    
+    final_traj.append({'xmin': x_min, 'xmax': x_max, 'ymin': y_min, 'ymax': y_max})
+
+# Save trajectories and intermediate data
+dict_final_traj = {i: final_traj[i] for i in range(len(final_traj))}
+with open('Results/final_traj.pkl', 'wb') as f:
+    pickle.dump(dict_final_traj, f)
+
+# Save additional data needed for part 2
+np.save('Results/array_3d_zero.npy', array_3d_zero)
+
+with open('Results/df_prio_xy.pkl', 'wb') as f:
+    pickle.dump(df_prio_xy, f)
+
+# =============================================================================
+# Matching process with parallel processing and resume capability (HEAVY PART)
+# =============================================================================
+
+# Check for existing progress
+start_idx, dict_inp, dict_mat = load_progress()
+if len(dict_inp)>0:
+    dict_inp = [dict_inp[i] for i in dict_inp.keys()]
+if len(dict_mat)>0:
+    dict_mat = [dict_mat[i] for i in dict_mat.keys()]
+
+for idx in range(start_idx, len(final_traj)):
+    coor = final_traj[idx]
+    
+    sub_array = array_3d_zero[coor['xmin']:coor['xmax']+1, 
+                              coor['ymin']:coor['ymax']+1, -12:]
+    
+    # Only append if we're processing new trajectories
+    if idx >= len(dict_inp):
+        dict_inp.append(sub_array)
+    
+    # Pre-compute values for this sub-array
+    bound_1 = np.array([[0, 0, 0], list(sub_array.shape)])
+    non_zero_indices = np.argwhere(sub_array != 0)
+    coordinates_1 = non_zero_indices.astype(np.float32)
+    coordinates_1 = (coordinates_1 - bound_1.min(axis=0)) / (bound_1.max(axis=0) - 1 - bound_1.min(axis=0))
+    coordinates_1 = np.nan_to_num(coordinates_1,0.5)
+    
+    if len(non_zero_indices) > 1:
+        weights_1 = sub_array[sub_array != 0]
+        weight_range = weights_1.flatten().max(axis=0) - weights_1.flatten().min(axis=0)
+        if weight_range > 0:
+            mass_w1 = sum((weights_1.flatten() - weights_1.flatten().min(axis=0)) / weight_range)
         else:
-            mass_w1 = 1
-            weights_1 = np.array([1])
+            mass_w1 = len(weights_1)  # All weights are equal
+        weights_1 = weights_1 / np.sum(weights_1)
+    else:
+        mass_w1 = 1
+        weights_1 = np.array([1])
+    
+    # Generate parameter ranges - handle edge cases where dimensions are 1
+    x_step = max(1, int(sub_array.shape[0] / 2)) if sub_array.shape[0] > 1 else 1
+    y_step = max(1, int(sub_array.shape[1] / 2)) if sub_array.shape[1] > 1 else 1
+    
+    # Ensure we have meaningful search ranges even for small sub-arrays
+    x_r_range = [-int(sub_array.shape[0] / 4), 0, int(sub_array.shape[0] / 4)]
+    y_r_range = [-int(sub_array.shape[1] / 4), 0, int(sub_array.shape[1] / 4)]
+    
+    z_r_range = [-3, 0, 3]
+    
+    # Smart filtering: only look at active, non-isolated locations
+    active_locations = find_active_locations_smart(array_3d_zero, neighbor_distance=3)
+    
+    # Create non-overlapping search tasks
+    tasks = create_non_overlapping_tasks(
+        array_3d_zero, sub_array, active_locations,
+        x_step, y_step, x_r_range, y_r_range, z_r_range
+    )
+    
+    # Execute in parallel using all available cores
+    if tasks:
+        # Process in smaller batches to avoid memory issues
+        batch_size = max(1, len(tasks) // 4)  # Process in 4 batches
+        all_results = []
         
-        # Generate parameter ranges - handle edge cases where dimensions are 1
-        x_step = max(1, int(sub_array.shape[0] / 2)) if sub_array.shape[0] > 1 else 1
-        y_step = max(1, int(sub_array.shape[1] / 2)) if sub_array.shape[1] > 1 else 1
-        
-        # Ensure we have meaningful search ranges even for small sub-arrays
-        x_r_range = [-int(sub_array.shape[0] / 4), 0, int(sub_array.shape[0] / 4)]
-        y_r_range = [-int(sub_array.shape[1] / 4), 0, int(sub_array.shape[1] / 4)]
-        
-        z_r_range = [-3, 0, 3]
-        
-        # Smart filtering: only look at active, non-isolated locations
-        active_locations = find_active_locations_smart(array_3d_zero, neighbor_distance=3)
-        
-        # Create non-overlapping search tasks
-        tasks = create_non_overlapping_tasks(
-            array_3d_zero, sub_array, active_locations,
-            x_step, y_step, x_r_range, y_r_range, z_r_range
-        )
-        
-        # Execute in parallel using all available cores
-        if tasks:
-            # Process in smaller batches to avoid memory issues
-            batch_size = max(1, len(tasks) // 4)  # Process in 4 batches
-            all_results = []
+        for batch_start in range(0, len(tasks), batch_size):
+            batch_end = min(batch_start + batch_size, len(tasks))
+            batch_tasks = tasks[batch_start:batch_end]
             
-            for batch_start in range(0, len(tasks), batch_size):
-                batch_end = min(batch_start + batch_size, len(tasks))
-                batch_tasks = tasks[batch_start:batch_end]
-                
-                # Create the full arguments for this batch
-                full_tasks = []
-                for x_list, y, z in batch_tasks:
-                    full_tasks.append((
-                        x_list, y, z, array_3d_zero, sub_array,
-                        x_r_range, y_r_range, z_r_range,
-                        non_zero_indices, coordinates_1, weights_1, mass_w1
-                    ))
-                
-                # Use backend='threading' to share memory instead of copying
-                batch_results = Parallel(n_jobs=-1, backend='threading')(
-                    delayed(parallel_matching_worker)(task) for task in full_tasks
-                )
-                all_results.extend(batch_results)
-                
-                # Force garbage collection between batches
-                del full_tasks
-                del batch_results
-                import gc
-                gc.collect()
+            # Create the full arguments for this batch
+            full_tasks = []
+            for x_list, y, z in batch_tasks:
+                full_tasks.append((
+                    x_list, y, z, array_3d_zero, sub_array,
+                    x_r_range, y_r_range, z_r_range,
+                    non_zero_indices, coordinates_1, weights_1, mass_w1
+                ))
             
-            results = all_results
+            # Use backend='threading' to share memory instead of copying
+            batch_results = Parallel(n_jobs=-1, backend='threading')(
+                delayed(parallel_matching_worker)(task) for task in full_tasks
+            )
+            all_results.extend(batch_results)
             
-            # Flatten results
-            dist_arr = []
-            for result_batch in results:
-                dist_arr.extend(result_batch)
-        else:
-            dist_arr = []
+            # Force garbage collection between batches
+            del full_tasks
+            del batch_results
+            import gc
+            gc.collect()
         
-        # Process results
-        if dist_arr:
-            dist_arr = pd.DataFrame(dist_arr)
-            dist_arr['Sum'] = dist_arr[6] + dist_arr[8]
-            dist_arr = dist_arr.sort_values(['Sum'])
-            dist_arr = dist_arr.iloc[:1000, :]
-            dist_arr = filter_overlaps(dist_arr)
-        else:
-            dist_arr = pd.DataFrame()
+        results = all_results
         
-        # Only append if we're processing new trajectories
-        if idx >= len(dict_mat):
-            dict_mat.append(dist_arr)
-        
-        # Save progress every 5 trajectories
-        if (idx + 1) % 5 == 0:
-            save_progress(idx + 1, dict_inp, dict_mat)
+        # Flatten results
+        dist_arr = []
+        for result_batch in results:
+            dist_arr.extend(result_batch)
+    else:
+        dist_arr = []
+    
+    # Process results
+    if dist_arr:
+        dist_arr = pd.DataFrame(dist_arr)
+        dist_arr['Sum'] = dist_arr[6] + dist_arr[8]
+        dist_arr = dist_arr.sort_values(['Sum'])
+        dist_arr = dist_arr.iloc[:1000, :]
+        dist_arr = filter_overlaps(dist_arr)
+    else:
+        dist_arr = pd.DataFrame()
+    
+    # Only append if we're processing new trajectories
+    if idx >= len(dict_mat):
+        dict_mat.append(dist_arr)
+    
+    # Save progress every 5 trajectories
+    if (idx + 1) % 5 == 0:
+        save_progress(idx + 1, dict_inp, dict_mat)
 
-    # Save final matching results
-    dict_save_mat = {i: dict_mat[i] for i in range(len(dict_mat))}
-    with open('Results/matches.pkl', 'wb') as f:
-        pickle.dump(dict_save_mat, f)
+# Save final matching results
+dict_save_mat = {i: dict_mat[i] for i in range(len(dict_mat))}
+with open('Results/matches.pkl', 'wb') as f:
+    pickle.dump(dict_save_mat, f)
 
-    dict_save_inp = {i: dict_inp[i] for i in range(len(dict_inp))}
-    with open('Results/input.pkl', 'wb') as f:
-        pickle.dump(dict_save_inp, f)
+dict_save_inp = {i: dict_inp[i] for i in range(len(dict_inp))}
+with open('Results/input.pkl', 'wb') as f:
+    pickle.dump(dict_save_inp, f)
 
-    # Clean up progress file
-    if os.path.exists('Results/progress.pkl'):
-        os.remove('Results/progress.pkl')
+# Clean up progress file
+if os.path.exists('Results/progress.pkl'):
+    os.remove('Results/progress.pkl')
 
-    # Save processing state
-    state = {
-        'total_trajectories': len(final_traj),
-        'processing_complete': True,
-        'timestamp': datetime.now().isoformat()
-    }
-    with open('Results/processing_state.pkl', 'wb') as f:
-        pickle.dump(state, f)
-
-
-if __name__ == "__main__":
-    main()
+# Save processing state
+state = {
+    'total_trajectories': len(final_traj),
+    'processing_complete': True,
+    'timestamp': datetime.now().isoformat()
+}
+with open('Results/processing_state.pkl', 'wb') as f:
+    pickle.dump(state, f)
