@@ -321,7 +321,11 @@ except FileNotFoundError as e:
     raise Exception(f"Required data from Part 1 not found: {e}")
 
 # Check for existing progress
-start_idx, dict_inp, dict_mat = load_progress()
+#start_idx, dict_inp, dict_mat = load_progress()
+with open('Results/matches.pkl', 'rb') as f:
+    dict_mat = pickle.load(f)
+with open('Results/input.pkl', 'rb') as f:
+    dict_inp = pickle.load(f)
 dict_inp = [dict_inp[i] for i in dict_inp.keys()]
 dict_mat = [dict_mat[i] for i in dict_mat.keys()]
 
@@ -329,120 +333,120 @@ dict_mat = [dict_mat[i] for i in dict_mat.keys()]
 # Matching process with parallel processing and resume capability
 # =============================================================================
 
-for idx in range(start_idx, len(final_traj)):
-    coor = final_traj[idx]
+# for idx in range(start_idx, len(final_traj)):
+#     coor = final_traj[idx]
     
-    sub_array = array_3d_zero[coor['xmin']:coor['xmax']+1, 
-                              coor['ymin']:coor['ymax']+1, -12:]
+#     sub_array = array_3d_zero[coor['xmin']:coor['xmax']+1, 
+#                               coor['ymin']:coor['ymax']+1, -12:]
     
-    # Only append if we're processing new trajectories
-    if idx >= len(dict_inp):
-        dict_inp.append(sub_array)
+#     # Only append if we're processing new trajectories
+#     if idx >= len(dict_inp):
+#         dict_inp.append(sub_array)
     
-    # Pre-compute values for this sub-array
-    bound_1 = np.array([[0, 0, 0], list(sub_array.shape)])
-    non_zero_indices = np.argwhere(sub_array != 0)
-    coordinates_1 = non_zero_indices.astype(np.float32)
-    coordinates_1 = (coordinates_1 - bound_1.min(axis=0)) / (bound_1.max(axis=0) - 1 - bound_1.min(axis=0))
-    coordinates_1 = np.nan_to_num(coordinates_1,0.5)
+#     # Pre-compute values for this sub-array
+#     bound_1 = np.array([[0, 0, 0], list(sub_array.shape)])
+#     non_zero_indices = np.argwhere(sub_array != 0)
+#     coordinates_1 = non_zero_indices.astype(np.float32)
+#     coordinates_1 = (coordinates_1 - bound_1.min(axis=0)) / (bound_1.max(axis=0) - 1 - bound_1.min(axis=0))
+#     coordinates_1 = np.nan_to_num(coordinates_1,0.5)
     
-    if len(non_zero_indices) > 1:
-        weights_1 = sub_array[sub_array != 0]
-        weight_range = weights_1.flatten().max(axis=0) - weights_1.flatten().min(axis=0)
-        if weight_range > 0:
-            mass_w1 = sum((weights_1.flatten() - weights_1.flatten().min(axis=0)) / weight_range)
-        else:
-            mass_w1 = len(weights_1)  # All weights are equal
-        weights_1 = weights_1 / np.sum(weights_1)
-    else:
-        mass_w1 = 1
-        weights_1 = np.array([1])
+#     if len(non_zero_indices) > 1:
+#         weights_1 = sub_array[sub_array != 0]
+#         weight_range = weights_1.flatten().max(axis=0) - weights_1.flatten().min(axis=0)
+#         if weight_range > 0:
+#             mass_w1 = sum((weights_1.flatten() - weights_1.flatten().min(axis=0)) / weight_range)
+#         else:
+#             mass_w1 = len(weights_1)  # All weights are equal
+#         weights_1 = weights_1 / np.sum(weights_1)
+#     else:
+#         mass_w1 = 1
+#         weights_1 = np.array([1])
     
-    # Generate parameter ranges - handle edge cases where dimensions are 1
-    x_step = max(1, int(sub_array.shape[0] / 2)) if sub_array.shape[0] > 1 else 1
-    y_step = max(1, int(sub_array.shape[1] / 2)) if sub_array.shape[1] > 1 else 1
+#     # Generate parameter ranges - handle edge cases where dimensions are 1
+#     x_step = max(1, int(sub_array.shape[0] / 2)) if sub_array.shape[0] > 1 else 1
+#     y_step = max(1, int(sub_array.shape[1] / 2)) if sub_array.shape[1] > 1 else 1
     
-    # Ensure we have meaningful search ranges even for small sub-arrays
-    x_r_range = [-int(sub_array.shape[0] / 4), 0, int(sub_array.shape[0] / 4)]
-    y_r_range = [-int(sub_array.shape[1] / 4), 0, int(sub_array.shape[1] / 4)]
+#     # Ensure we have meaningful search ranges even for small sub-arrays
+#     x_r_range = [-int(sub_array.shape[0] / 4), 0, int(sub_array.shape[0] / 4)]
+#     y_r_range = [-int(sub_array.shape[1] / 4), 0, int(sub_array.shape[1] / 4)]
     
-    z_r_range = [-3, 0, 3]
+#     z_r_range = [-3, 0, 3]
     
-    # Smart filtering: only look at active, non-isolated locations
-    active_locations = find_active_locations_smart(array_3d_zero, neighbor_distance=3)
+#     # Smart filtering: only look at active, non-isolated locations
+#     active_locations = find_active_locations_smart(array_3d_zero, neighbor_distance=3)
     
-    # Create non-overlapping search tasks
-    tasks = create_non_overlapping_tasks(
-        array_3d_zero, sub_array, active_locations,
-        x_step, y_step, x_r_range, y_r_range, z_r_range
-    )
+#     # Create non-overlapping search tasks
+#     tasks = create_non_overlapping_tasks(
+#         array_3d_zero, sub_array, active_locations,
+#         x_step, y_step, x_r_range, y_r_range, z_r_range
+#     )
     
-    # Execute in parallel using all available cores
-    if tasks:
-        # Process in smaller batches to avoid memory issues
-        batch_size = max(1, len(tasks) // 4)  # Process in 4 batches
-        all_results = []
+#     # Execute in parallel using all available cores
+#     if tasks:
+#         # Process in smaller batches to avoid memory issues
+#         batch_size = max(1, len(tasks) // 4)  # Process in 4 batches
+#         all_results = []
         
-        for batch_start in range(0, len(tasks), batch_size):
-            batch_end = min(batch_start + batch_size, len(tasks))
-            batch_tasks = tasks[batch_start:batch_end]
+#         for batch_start in range(0, len(tasks), batch_size):
+#             batch_end = min(batch_start + batch_size, len(tasks))
+#             batch_tasks = tasks[batch_start:batch_end]
             
-            # Create the full arguments for this batch
-            full_tasks = []
-            for x_list, y, z in batch_tasks:
-                full_tasks.append((
-                    x_list, y, z, array_3d_zero, sub_array,
-                    x_r_range, y_r_range, z_r_range,
-                    non_zero_indices, coordinates_1, weights_1, mass_w1
-                ))
+#             # Create the full arguments for this batch
+#             full_tasks = []
+#             for x_list, y, z in batch_tasks:
+#                 full_tasks.append((
+#                     x_list, y, z, array_3d_zero, sub_array,
+#                     x_r_range, y_r_range, z_r_range,
+#                     non_zero_indices, coordinates_1, weights_1, mass_w1
+#                 ))
             
-            # Use backend='threading' to share memory instead of copying
-            batch_results = Parallel(n_jobs=-1, backend='threading')(
-                delayed(parallel_matching_worker)(task) for task in full_tasks
-            )
-            all_results.extend(batch_results)
+#             # Use backend='threading' to share memory instead of copying
+#             batch_results = Parallel(n_jobs=-1, backend='threading')(
+#                 delayed(parallel_matching_worker)(task) for task in full_tasks
+#             )
+#             all_results.extend(batch_results)
             
-            # Force garbage collection between batches
-            del full_tasks
-            del batch_results
-            import gc
-            gc.collect()
+#             # Force garbage collection between batches
+#             del full_tasks
+#             del batch_results
+#             import gc
+#             gc.collect()
         
-        results = all_results
+#         results = all_results
         
-        # Flatten results
-        dist_arr = []
-        for result_batch in results:
-            dist_arr.extend(result_batch)
-    else:
-        dist_arr = []
+#         # Flatten results
+#         dist_arr = []
+#         for result_batch in results:
+#             dist_arr.extend(result_batch)
+#     else:
+#         dist_arr = []
     
-    # Process results
-    if dist_arr:
-        dist_arr = pd.DataFrame(dist_arr)
-        dist_arr['Sum'] = dist_arr[6] + dist_arr[8]
-        dist_arr = dist_arr.sort_values(['Sum'])
-        dist_arr = dist_arr.iloc[:1000, :]
-        dist_arr = filter_overlaps(dist_arr)
-    else:
-        dist_arr = pd.DataFrame()
+#     # Process results
+#     if dist_arr:
+#         dist_arr = pd.DataFrame(dist_arr)
+#         dist_arr['Sum'] = dist_arr[6] + dist_arr[8]
+#         dist_arr = dist_arr.sort_values(['Sum'])
+#         dist_arr = dist_arr.iloc[:1000, :]
+#         dist_arr = filter_overlaps(dist_arr)
+#     else:
+#         dist_arr = pd.DataFrame()
     
-    # Only append if we're processing new trajectories
-    if idx >= len(dict_mat):
-        dict_mat.append(dist_arr)
+#     # Only append if we're processing new trajectories
+#     if idx >= len(dict_mat):
+#         dict_mat.append(dist_arr)
     
-    # Save progress every 5 trajectories
-    if (idx + 1) % 5 == 0:
-        save_progress(idx + 1, dict_inp, dict_mat)
+#     # Save progress every 5 trajectories
+#     if (idx + 1) % 5 == 0:
+#         save_progress(idx + 1, dict_inp, dict_mat)
 
-# Save final results
-dict_save_mat = {i: dict_mat[i] for i in range(len(dict_mat))}
-with open('Results/matches.pkl', 'wb') as f:
-    pickle.dump(dict_save_mat, f)
+# # Save final results
+# dict_save_mat = {i: dict_mat[i] for i in range(len(dict_mat))}
+# with open('Results/matches.pkl', 'wb') as f:
+#     pickle.dump(dict_save_mat, f)
 
-dict_save_inp = {i: dict_inp[i] for i in range(len(dict_inp))}
-with open('Results/input.pkl', 'wb') as f:
-    pickle.dump(dict_save_inp, f)
+# dict_save_inp = {i: dict_inp[i] for i in range(len(dict_inp))}
+# with open('Results/input.pkl', 'wb') as f:
+#     pickle.dump(dict_save_inp, f)
 
 # =============================================================================
 # Create the forecasts
